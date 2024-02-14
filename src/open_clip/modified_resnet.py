@@ -176,6 +176,10 @@ class ModifiedResNet(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
-        x = self.attnpool(x)
-
+        # x = self.attnpool(x)
+        
+        ### modified for depth clip
+        x=x.reshape(-1,2048,221)
+        # x=x.reshape(-1,4096,221)
+        x=x.permute(2,0,1)
         return x
