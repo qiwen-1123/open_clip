@@ -7,6 +7,11 @@ results/
 tests/data/
 *.pt
 
+# ignore data
+*.jpg
+*.png
+*.pth
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -11,8 +11,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torchvision.transforms as transforms
 
+from open_clip import build_zero_shot_classifier
 
 depth_templates = ["This {} is {}"]
+detection_templates = ["A photo of a {}"]
+
 obj_classes = ["object"]
 depth_classes = [
     "giant",
@@ -23,27 +26,47 @@ depth_classes = [
     "far",
     "unseen",
 ]
-bin_list = [1.00, 1.50, 2.00, 2.25, 2.50, 2.75, 3.00]
-temperature = 0.1
-clip_vis = "RN50"
-model_name="RN50"
-pre_trained="openai"
 
+nusc_classes = [
+    "car",
+    "truck",
+    "trailer",
+    "bus",
+    "construction vehicle",
+    "bicycle",
+    "motorcycle",
+    "person",
+    "traffic_cone",
+    "barrier",
+    "road surface",
+    "traffic light",
+    "street light",
+    "traffic sign",
+    "sidewalk",
+    "building",
+    "sky",
+    "tree",
+]
 
-def zeroshot_classifier(depth_classes, obj_classes, templates, model):
+coco_cls=["person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush", "banner", "blanket", "branch", "bridge", "building-other", "bush", "cabinet", "cage", "cardboard", "carpet", "ceiling-other", "ceiling-tile", "cloth", "clothes", "clouds", "counter", "cupboard", "curtain", "desk-stuff", "dirt", "door-stuff", "fence", "floor-marble", "floor-other", "floor-stone", "floor-tile", "floor-wood", "flower", "fog", "food-other", "fruit", "furniture-other", "grass", "gravel", "ground-other", "hill", "house", "leaves", "light", "mat", "metal", "mirror-stuff", "moss", "mountain", "mud", "napkin", "net", "paper", "pavement", "pillow", "plant-other", "plastic", "platform", "playingfield", "railing", "railroad", "river", "road", "rock", "roof", "rug", "salad", "sand", "sea", "shelf", "sky-other", "skyscraper", "snow", "solid-other", "stairs", "stone", "straw", "structural-other", "table", "tent", "textile-other", "towel", "tree", "vegetable", "wall-brick", "wall-concrete", "wall-other", "wall-panel", "wall-stone", "wall-tile", "wall-wood", "water-other", "waterdrops", "window-blind", "window-other", "wood"]
+
+model_name = "convnext_large_d_320" # convnext_large_d_320, ViT-H-14-378-quickgelu, ViT-H-14
+pre_trained = "laion2b_s29b_b131k_ft_soup"  # laion2b_s29b_b131k_ft_soup, dfn5b
+tokenizer = open_clip.get_tokenizer(model_name)
+
+def zeroshot_classifier(data_classes, templates, model):
     with torch.no_grad():
         zeroshot_weights = []
-        for depth in depth_classes:
-            for obj in obj_classes:
-                texts = [
-                    template.format(obj, depth) for template in templates
-                ]  # format with class
-                texts = clip.tokenize(texts).cuda()  # tokenize
-                class_embeddings = model.encode_text(texts)  # embed with text encoder
-                class_embeddings /= class_embeddings.norm(dim=-1, keepdim=True)
-                class_embedding = class_embeddings.mean(dim=0)
-                class_embedding /= class_embedding.norm()
-                zeroshot_weights.append(class_embedding)
+        for data_class in data_classes:
+            texts = [
+                template.format(data_class) for template in templates
+            ]  # format with class
+            texts=tokenizer(texts).cuda()
+            class_embeddings = model.encode_text(texts)  # embed with text encoder
+            class_embeddings /= class_embeddings.norm(dim=-1, keepdim=True)
+            class_embedding = class_embeddings.mean(dim=0)
+            class_embedding /= class_embedding.norm()
+            zeroshot_weights.append(class_embedding)
         zeroshot_weights = torch.stack(zeroshot_weights, dim=1).cuda()
     return zeroshot_weights
 
@@ -64,19 +87,25 @@ class FCLayer(nn.Module):
 
 
 class MonoCLIP(nn.Module):
-    def __init__(self):
+    def __init__(self, data_class:list,):
         super(MonoCLIP, self).__init__()
-        self.bins = len(depth_classes)
-        
+        self.class_num = len(data_class)
+        self.data_class = data_class
+
         self.clip, _, self.preprocess = open_clip.create_model_and_transforms(
             model_name, pretrained=pre_trained
         )
 
-
         self.clip = self.clip.to("cuda")
-        self.text_f = zeroshot_classifier(
-            depth_classes, obj_classes, depth_templates, self.clip
-        )  # init text feature
+
+        # self.text_f = zeroshot_classifier(
+        #     self.data_class, detection_templates, self.clip
+        # )  # init text feature
+        
+        self.text_f = build_zero_shot_classifier(self.clip, tokenizer,
+                                                      self.data_class,
+                                                      detection_templates,
+                                                      device="cuda",)
 
         # self.adapter = FCLayer(1024).to(self.clip.dtype)
 
@@ -89,52 +118,57 @@ class MonoCLIP(nn.Module):
             img_f, scale_factor=0.5
         )  # to match size
 
-        depth_logits = (
-            100.0 * img_f @ self.text_f
-        )  # B, HW, K # img_f and text_f have both been normalized, so just use a inner product
-        depth_logits = depth_logits.permute(0, 2, 1).reshape(
-            -1, self.bins, 13, 17
+        # dataset class conf
+        class_conf = 100 * img_f @ self.text_f
+        class_conf = class_conf.permute(0, 2, 1).reshape(
+            -1, self.class_num, int(h/32), int(w/32)
         )  # B, K, H, W
-        depth_logits /= temperature
+        class_conf = F.softmax(class_conf, dim=1)
 
-        depth = F.softmax(depth_logits, dim=1)
-        bin_tensor = torch.tensor(bin_list).to(depth.device)
-        depth = depth * bin_tensor.reshape(1, self.bins).unsqueeze(-1).unsqueeze(-1)
-        depth = depth.sum(1, keepdim=True)
-        return depth
+        return class_conf
 
+if __name__ == "__main__":
 
+    model = MonoCLIP(coco_cls)
+    image_ori = Image.open("000000217948.jpg")
 
+    model.preprocess.transforms.pop(0)
+    model.preprocess.transforms.pop(0)
+    image = model.preprocess(image_ori)
 
-if __name__ == '__main__':
+    h=image.shape[-2]
+    w=image.shape[-1]
 
-    Model = MonoCLIP()
+    # image_numpy = image.permute(1, 2, 0).cpu().numpy()
+    # plt.imshow(image_numpy)
 
-    image = Image.open("demo.jpg")
-    image = image.convert("RGB")
-    image = image.resize((544, 416))
-
-    image = np.asarray(image, dtype=np.float32) / 255.0
-
-    to_tensor = transforms.ToTensor()
-    tensor_image = to_tensor(image)
-
-    input = tensor_image.to("cuda").unsqueeze(0)
+    input = image.to("cuda").unsqueeze(0)
     input_img_flip = torch.flip(input, [3])
 
-    output_depth = Model(input)
-    output_depth_flip = Model(input_img_flip)
-    output_depth_flip = torch.flip(output_depth_flip, [3])
-    output_depth = 0.5 * (output_depth + output_depth_flip)
+    class_conf = model(input)
+    
+    # add flip
+    # class_conf_flip = model(input_img_flip)
+    # class_conf_flip = torch.flip(class_conf_flip, [3])
+    # class_conf = 0.5 * (class_conf + class_conf_flip)
+    
+    # interpolation
+    # class_conf = nn.functional.interpolate(
+    #     class_conf, size=(448, 448), mode="bilinear", align_corners=True
+    # )
+    
+    # torch.save(class_conf.squeeze(0).detach(), "6832e717621341568c759151b5974512.pth")
 
-    output_depth = nn.functional.interpolate(
-        output_depth, size=[416, 544], mode="bilinear", align_corners=True
-    )
+    class_conf_np = class_conf.squeeze().cpu().detach().numpy()
 
-    depth_np = output_depth.squeeze().cpu().detach().numpy()
-    plt.imshow(depth_np, cmap="gray")
-    plt.colorbar()  # 添加颜色条，用于显示深度值对应的颜色
+    mask = np.argmax(class_conf_np, axis=0)
+
+    plt.imshow(mask, cmap="jet", alpha=0.5)
+    # plt.colorbar(label=nusc_classes,orientation='horizontal')
+
+    # plt.imshow(image_new, alpha=0.5)
+    
+
     plt.show()
-
-
+    plt.close()
     print("done")
