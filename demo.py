@@ -5,13 +5,15 @@ import open_clip
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import clip
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torchvision.transforms as transforms
 
 from open_clip import build_zero_shot_classifier
+
+seed_value = 42
+torch.manual_seed(seed_value)
 
 depth_templates = ["This {} is {}"]
 detection_templates = ["A photo of a {}"]
@@ -106,12 +108,22 @@ class MonoCLIP(nn.Module):
                                                       self.data_class,
                                                       detection_templates,
                                                       device="cuda",)
+        # last_text_f = torch.load("text_f.pth")
+        # res = last_text_f - self.text_f
+        # torch.save(self.text_f.detach(), "text_f.pth")
 
         # self.adapter = FCLayer(1024).to(self.clip.dtype)
 
     def forward(self, x):
+        h = x.shape[-2]
+        w = x.shape[-1]
+        
         img_f = self.clip.encode_image(x).permute(1, 0, 2)  # B, HW, C
         img_f = img_f / img_f.norm(dim=-1, keepdim=True)  # normalize img_f
+
+        # last = torch.load("img_f.pth")
+        # res = (last - img_f).norm()
+        # torch.save(img_f.detach(), "img_f.pth")
 
         # @: dot product of two vectors
         img_f = torch.nn.functional.interpolate(
@@ -129,7 +141,7 @@ class MonoCLIP(nn.Module):
 
 if __name__ == "__main__":
 
-    model = MonoCLIP(coco_cls)
+    model = MonoCLIP(nusc_classes)
     image_ori = Image.open("000000217948.jpg")
 
     model.preprocess.transforms.pop(0)
@@ -146,6 +158,10 @@ if __name__ == "__main__":
     input_img_flip = torch.flip(input, [3])
 
     class_conf = model(input)
+    
+    # last = torch.load("6832e717621341568c759151b5974512.pth")
+    # res = (class_conf.squeeze(0)-last).norm()
+    # torch.save(class_conf.squeeze(0).detach(), "0d0700a2284e477db876c3ee1d864668.pth")
     
     # add flip
     # class_conf_flip = model(input_img_flip)
