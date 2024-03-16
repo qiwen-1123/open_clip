@@ -115,10 +115,10 @@ class MonoCLIP(nn.Module):
         # self.adapter = FCLayer(1024).to(self.clip.dtype)
 
     def forward(self, x):
-        h = x.shape[-2]
-        w = x.shape[-1]
-        
-        img_f = self.clip.encode_image(x).permute(1, 0, 2)  # B, HW, C
+        img_f = self.clip.encode_image(x)  # B, C, H, W
+        h = img_f.shape[-2]
+        w = img_f.shape[-1]
+        img_f=img_f.reshape(-1,img_f.shape[-3],img_f.shape[-2]*img_f.shape[-1]).permute(0,2,1)
         img_f = img_f / img_f.norm(dim=-1, keepdim=True)  # normalize img_f
 
         # last = torch.load("img_f.pth")
@@ -133,7 +133,7 @@ class MonoCLIP(nn.Module):
         # dataset class conf
         class_conf = 100 * img_f @ self.text_f
         class_conf = class_conf.permute(0, 2, 1).reshape(
-            -1, self.class_num, int(h/32), int(w/32)
+            -1, self.class_num, h, w
         )  # B, K, H, W
         class_conf = F.softmax(class_conf, dim=1)
 

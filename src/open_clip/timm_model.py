@@ -151,6 +151,6 @@ class TimmModel(nn.Module):
         # x = self.head(x)
         x = self.trunk.forward_features(x) # get feature
         # x=x.reshape(-1,1536,221)
-        x=x.reshape(-1,1536,x.shape[-2]*x.shape[-1])
-        x=x.permute(2,0,1)
+        # x=x.reshape(-1,1536,x.shape[-2]*x.shape[-1])
+        # x=x.permute(2,0,1)
         return x
