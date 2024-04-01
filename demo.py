@@ -52,8 +52,8 @@ nusc_classes = [
 
 coco_cls=["person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush", "banner", "blanket", "branch", "bridge", "building-other", "bush", "cabinet", "cage", "cardboard", "carpet", "ceiling-other", "ceiling-tile", "cloth", "clothes", "clouds", "counter", "cupboard", "curtain", "desk-stuff", "dirt", "door-stuff", "fence", "floor-marble", "floor-other", "floor-stone", "floor-tile", "floor-wood", "flower", "fog", "food-other", "fruit", "furniture-other", "grass", "gravel", "ground-other", "hill", "house", "leaves", "light", "mat", "metal", "mirror-stuff", "moss", "mountain", "mud", "napkin", "net", "paper", "pavement", "pillow", "plant-other", "plastic", "platform", "playingfield", "railing", "railroad", "river", "road", "rock", "roof", "rug", "salad", "sand", "sea", "shelf", "sky-other", "skyscraper", "snow", "solid-other", "stairs", "stone", "straw", "structural-other", "table", "tent", "textile-other", "towel", "tree", "vegetable", "wall-brick", "wall-concrete", "wall-other", "wall-panel", "wall-stone", "wall-tile", "wall-wood", "water-other", "waterdrops", "window-blind", "window-other", "wood"]
 
-model_name = "convnext_large_d_320" # convnext_large_d_320, ViT-H-14-378-quickgelu, ViT-H-14
-pre_trained = "laion2b_s29b_b131k_ft_soup"  # laion2b_s29b_b131k_ft_soup, dfn5b
+model_name = "ViT-B-16" # convnext_large_d_320, ViT-H-14-378-quickgelu, ViT-H-14, ViT-B-16, RN50
+pre_trained = "openai"  # laion2b_s29b_b131k_ft_soup, dfn5b
 tokenizer = open_clip.get_tokenizer(model_name)
 
 def zeroshot_classifier(data_classes, templates, model):
@@ -118,34 +118,42 @@ class MonoCLIP(nn.Module):
         img_f = self.clip.encode_image(x)  # B, C, H, W
         h = img_f.shape[-2]
         w = img_f.shape[-1]
-        img_f=img_f.reshape(-1,img_f.shape[-3],img_f.shape[-2]*img_f.shape[-1]).permute(0,2,1)
-        img_f = img_f / img_f.norm(dim=-1, keepdim=True)  # normalize img_f
+        # img_f=img_f.reshape(-1,img_f.shape[-3],img_f.shape[-2]*img_f.shape[-1]).permute(0,2,1)
+        # img_f = img_f / img_f.norm(dim=-1, keepdim=True)  # normalize img_f
 
+        # new
+        img_f /= img_f.norm(dim=-1, keepdim=True)
+        img_f = img_f[:, 1:]
+        
+        patch_size = self.clip.visual.patch_size
+        w, h = x[0].shape[-2] // patch_size, x[0].shape[-1] // patch_size
+        # end
+        
         # last = torch.load("img_f.pth")
         # res = (last - img_f).norm()
         # torch.save(img_f.detach(), "img_f.pth")
 
         # @: dot product of two vectors
-        img_f = torch.nn.functional.interpolate(
-            img_f, scale_factor=0.5
-        )  # to match size
+        # img_f = torch.nn.functional.interpolate(
+        #     img_f, scale_factor=0.5
+        # )  # to match size
 
         # dataset class conf
-        class_conf = 100 * img_f @ self.text_f
+        class_conf = img_f @ self.text_f
         class_conf = class_conf.permute(0, 2, 1).reshape(
             -1, self.class_num, h, w
         )  # B, K, H, W
-        class_conf = F.softmax(class_conf, dim=1)
+        # class_conf = F.softmax(class_conf, dim=1)
 
         return class_conf
 
 if __name__ == "__main__":
 
-    model = MonoCLIP(nusc_classes)
-    image_ori = Image.open("000000217948.jpg")
+    model = MonoCLIP(coco_cls)
+    image_ori = Image.open("COCO_train2014_000000000825.jpg")
 
-    model.preprocess.transforms.pop(0)
-    model.preprocess.transforms.pop(0)
+    # model.preprocess.transforms.pop(0)
+    # model.preprocess.transforms.pop(0)
     image = model.preprocess(image_ori)
 
     h=image.shape[-2]

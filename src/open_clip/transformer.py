@@ -325,226 +325,374 @@ class Transformer(nn.Module):
         return x
 
 
+# class VisionTransformer(nn.Module):
+#     output_tokens: torch.jit.Final[bool]
+
+#     def __init__(
+#             self,
+#             image_size: int,
+#             patch_size: int,
+#             width: int,
+#             layers: int,
+#             heads: int,
+#             mlp_ratio: float,
+#             ls_init_value: float = None,
+#             attentional_pool: bool = False,
+#             attn_pooler_queries: int = 256,
+#             attn_pooler_heads: int = 8,
+#             output_dim: int = 512,
+#             patch_dropout: float = 0.,
+#             no_ln_pre: bool = False,
+#             pos_embed_type: str = 'learnable',
+#             pool_type: str = 'tok',
+#             final_ln_after_pool: bool = False,
+#             act_layer: Callable = nn.GELU,
+#             norm_layer: Callable = LayerNorm,
+#             output_tokens: bool = False,
+#     ):
+#         super().__init__()
+#         assert pool_type in ('tok', 'avg', 'none')
+#         self.output_tokens = output_tokens
+#         image_height, image_width = self.image_size = to_2tuple(image_size)
+#         patch_height, patch_width = self.patch_size = to_2tuple(patch_size)
+#         self.grid_size = (image_height // patch_height, image_width // patch_width)
+#         self.final_ln_after_pool = final_ln_after_pool  # currently ignored w/ attn pool enabled
+#         self.output_dim = output_dim
+
+#         self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
+
+#         # class embeddings and positional embeddings
+#         scale = width ** -0.5
+#         self.class_embedding = nn.Parameter(scale * torch.randn(width))
+#         if pos_embed_type == 'learnable':
+#             self.positional_embedding = nn.Parameter(
+#                 scale * torch.randn(self.grid_size[0] * self.grid_size[1] + 1, width))
+#         elif pos_embed_type == 'sin_cos_2d':
+#             # fixed sin-cos embedding
+#             assert self.grid_size[0] == self.grid_size[1],\
+#                 'currently sin cos 2d pos embedding only supports square input'
+#             self.positional_embedding = nn.Parameter(
+#                 torch.zeros(self.grid_size[0] * self.grid_size[1] + 1, width), requires_grad=False)
+#             pos_embed_type = get_2d_sincos_pos_embed(width, self.grid_size[0], cls_token=True)
+#             self.positional_embedding.data.copy_(torch.from_numpy(pos_embed_type).float())
+#         else:
+#             raise ValueError
+
+#         # setting a patch_dropout of 0. would mean it is disabled and this function would be the identity fn
+#         self.patch_dropout = PatchDropout(patch_dropout) if patch_dropout > 0. else nn.Identity()
+
+#         self.ln_pre = nn.Identity() if no_ln_pre else norm_layer(width)
+#         self.transformer = Transformer(
+#             width,
+#             layers,
+#             heads,
+#             mlp_ratio,
+#             ls_init_value=ls_init_value,
+#             act_layer=act_layer,
+#             norm_layer=norm_layer,
+#         )
+
+#         if attentional_pool:
+#             if isinstance(attentional_pool, str):
+#                 self.attn_pool_type = attentional_pool
+#                 self.pool_type = 'none'
+#                 if attentional_pool in ('parallel', 'cascade'):
+#                     self.attn_pool = AttentionalPooler(
+#                         output_dim,
+#                         width,
+#                         n_head=attn_pooler_heads,
+#                         n_queries=attn_pooler_queries,
+#                     )
+#                     self.attn_pool_contrastive = AttentionalPooler(
+#                         output_dim,
+#                         width,
+#                         n_head=attn_pooler_heads,
+#                         n_queries=1,
+#                     )
+#                 else:
+#                     assert False
+#             else:
+#                 self.attn_pool_type = ''
+#                 self.pool_type = pool_type
+#                 self.attn_pool = AttentionalPooler(
+#                     output_dim,
+#                     width,
+#                     n_head=attn_pooler_heads,
+#                     n_queries=attn_pooler_queries,
+#                 )
+#                 self.attn_pool_contrastive = None
+#             pool_dim = output_dim
+#         else:
+#             self.attn_pool = None
+#             pool_dim = width
+#             self.pool_type = pool_type
+
+#         self.ln_post = norm_layer(pool_dim)
+#         self.proj = nn.Parameter(scale * torch.randn(pool_dim, output_dim))
+
+#         self.init_parameters()
+
+#     def lock(self, unlocked_groups=0, freeze_bn_stats=False):
+#         for param in self.parameters():
+#             param.requires_grad = False
+
+#         if unlocked_groups != 0:
+#             groups = [
+#                 [
+#                     self.conv1,
+#                     self.class_embedding,
+#                     self.positional_embedding,
+#                     self.ln_pre,
+#                 ],
+#                 *self.transformer.resblocks[:-1],
+#                 [
+#                     self.transformer.resblocks[-1],
+#                     self.ln_post,
+#                 ],
+#                 self.proj,
+#             ]
+
+#             def _unlock(x):
+#                 if isinstance(x, Sequence):
+#                     for g in x:
+#                         _unlock(g)
+#                 else:
+#                     if isinstance(x, torch.nn.Parameter):
+#                         x.requires_grad = True
+#                     else:
+#                         for p in x.parameters():
+#                             p.requires_grad = True
+
+#             _unlock(groups[-unlocked_groups:])
+
+#     def init_parameters(self):
+#         # FIXME OpenAI CLIP did not define an init for the VisualTransformer
+#         # TODO experiment if default PyTorch init, below, or alternate init is best.
+
+#         # nn.init.normal_(self.class_embedding, std=self.scale)
+#         # nn.init.normal_(self.positional_embedding, std=self.scale)
+#         #
+#         # proj_std = (self.transformer.width ** -0.5) * ((2 * self.transformer.layers) ** -0.5)
+#         # attn_std = self.transformer.width ** -0.5
+#         # fc_std = (2 * self.transformer.width) ** -0.5
+#         # for block in self.transformer.resblocks:
+#         #     nn.init.normal_(block.attn.in_proj_weight, std=attn_std)
+#         #     nn.init.normal_(block.attn.out_proj.weight, std=proj_std)
+#         #     nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
+#         #     nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
+#         #
+#         # if self.text_projection is not None:
+#         #     nn.init.normal_(self.text_projection, std=self.scale)
+#         pass
+
+#     @torch.jit.ignore
+#     def set_grad_checkpointing(self, enable=True):
+#         self.transformer.grad_checkpointing = enable
+
+#     def _global_pool(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+#         if self.pool_type == 'avg':
+#             pooled, tokens = x[:, 1:].mean(dim=1), x[:, 1:]
+#         elif self.pool_type == 'tok':
+#             pooled, tokens = x[:, 0], x[:, 1:]
+#         else:
+#             pooled = tokens = x
+
+#         return pooled, tokens
+
+#     def forward(self, x: torch.Tensor):
+#         x = self.conv1(x)  # shape = [*, width, grid, grid]
+#         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
+#         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
+
+#         # class embeddings and positional embeddings
+#         x = torch.cat([_expand_token(self.class_embedding, x.shape[0]).to(x.dtype), x], dim=1)
+#         # shape = [*, grid ** 2 + 1, width]
+#         x = x + self.positional_embedding.to(x.dtype)
+
+#         x = self.patch_dropout(x)
+#         x = self.ln_pre(x)
+
+#         x = x.permute(1, 0, 2)  # NLD -> LND
+#         x = self.transformer(x)
+#         x = x.permute(1, 0, 2)  # LND -> NLD
+
+#         if self.attn_pool is not None:
+#             if self.attn_pool_contrastive is not None:
+#                 # This is untested, WIP pooling that should match paper
+#                 x = self.ln_post(x)  # TBD LN first or separate one after each pool?
+#                 tokens = self.attn_pool(x)
+#                 if self.attn_pool_type == 'parallel':
+#                     pooled = self.attn_pool_contrastive(x)
+#                 else:
+#                     assert self.attn_pool_type == 'cascade'
+#                     pooled = self.attn_pool_contrastive(tokens)
+#             else:
+#                 # this is the original OpenCLIP CoCa setup, does not match paper
+#                 x = self.attn_pool(x)
+#                 x = self.ln_post(x)
+#                 pooled, tokens = self._global_pool(x)
+#         elif self.final_ln_after_pool:
+#             pooled, tokens = self._global_pool(x)
+#             pooled = self.ln_post(pooled)
+#         else:
+#             x = self.ln_post(x)
+#             pooled, tokens = self._global_pool(x)
+
+#         if self.proj is not None:
+#             pooled = pooled @ self.proj
+
+#         if self.output_tokens:
+#             return pooled, tokens
+#         return x @ self.proj #pooled
+
+
 class VisionTransformer(nn.Module):
-    output_tokens: torch.jit.Final[bool]
-
-    def __init__(
-            self,
-            image_size: int,
-            patch_size: int,
-            width: int,
-            layers: int,
-            heads: int,
-            mlp_ratio: float,
-            ls_init_value: float = None,
-            attentional_pool: bool = False,
-            attn_pooler_queries: int = 256,
-            attn_pooler_heads: int = 8,
-            output_dim: int = 512,
-            patch_dropout: float = 0.,
-            no_ln_pre: bool = False,
-            pos_embed_type: str = 'learnable',
-            pool_type: str = 'tok',
-            final_ln_after_pool: bool = False,
-            act_layer: Callable = nn.GELU,
-            norm_layer: Callable = LayerNorm,
-            output_tokens: bool = False,
-    ):
+    def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int):
         super().__init__()
-        assert pool_type in ('tok', 'avg', 'none')
-        self.output_tokens = output_tokens
-        image_height, image_width = self.image_size = to_2tuple(image_size)
-        patch_height, patch_width = self.patch_size = to_2tuple(patch_size)
-        self.grid_size = (image_height // patch_height, image_width // patch_width)
-        self.final_ln_after_pool = final_ln_after_pool  # currently ignored w/ attn pool enabled
+        self.input_resolution = input_resolution
+        self.patch_size = patch_size
         self.output_dim = output_dim
-
+        self.width = width
+        self.heads = heads
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
 
-        # class embeddings and positional embeddings
         scale = width ** -0.5
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
-        if pos_embed_type == 'learnable':
-            self.positional_embedding = nn.Parameter(
-                scale * torch.randn(self.grid_size[0] * self.grid_size[1] + 1, width))
-        elif pos_embed_type == 'sin_cos_2d':
-            # fixed sin-cos embedding
-            assert self.grid_size[0] == self.grid_size[1],\
-                'currently sin cos 2d pos embedding only supports square input'
-            self.positional_embedding = nn.Parameter(
-                torch.zeros(self.grid_size[0] * self.grid_size[1] + 1, width), requires_grad=False)
-            pos_embed_type = get_2d_sincos_pos_embed(width, self.grid_size[0], cls_token=True)
-            self.positional_embedding.data.copy_(torch.from_numpy(pos_embed_type).float())
-        else:
-            raise ValueError
+        self.positional_embedding = nn.Parameter(scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width))
+        self.ln_pre = LayerNorm(width)
 
-        # setting a patch_dropout of 0. would mean it is disabled and this function would be the identity fn
-        self.patch_dropout = PatchDropout(patch_dropout) if patch_dropout > 0. else nn.Identity()
+        self.transformer = Transformer(width, layers, heads)
 
-        self.ln_pre = nn.Identity() if no_ln_pre else norm_layer(width)
-        self.transformer = Transformer(
-            width,
-            layers,
-            heads,
-            mlp_ratio,
-            ls_init_value=ls_init_value,
-            act_layer=act_layer,
-            norm_layer=norm_layer,
-        )
+        self.ln_post = LayerNorm(width)
+        self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
+    
+    def forward(self, x: torch.Tensor, return_all=True, csa=True):
 
-        if attentional_pool:
-            if isinstance(attentional_pool, str):
-                self.attn_pool_type = attentional_pool
-                self.pool_type = 'none'
-                if attentional_pool in ('parallel', 'cascade'):
-                    self.attn_pool = AttentionalPooler(
-                        output_dim,
-                        width,
-                        n_head=attn_pooler_heads,
-                        n_queries=attn_pooler_queries,
-                    )
-                    self.attn_pool_contrastive = AttentionalPooler(
-                        output_dim,
-                        width,
-                        n_head=attn_pooler_heads,
-                        n_queries=1,
-                    )
-                else:
-                    assert False
-            else:
-                self.attn_pool_type = ''
-                self.pool_type = pool_type
-                self.attn_pool = AttentionalPooler(
-                    output_dim,
-                    width,
-                    n_head=attn_pooler_heads,
-                    n_queries=attn_pooler_queries,
-                )
-                self.attn_pool_contrastive = None
-            pool_dim = output_dim
-        else:
-            self.attn_pool = None
-            pool_dim = width
-            self.pool_type = pool_type
+        B, nc, w, h = x.shape
 
-        self.ln_post = norm_layer(pool_dim)
-        self.proj = nn.Parameter(scale * torch.randn(pool_dim, output_dim))
-
-        self.init_parameters()
-
-    def lock(self, unlocked_groups=0, freeze_bn_stats=False):
-        for param in self.parameters():
-            param.requires_grad = False
-
-        if unlocked_groups != 0:
-            groups = [
-                [
-                    self.conv1,
-                    self.class_embedding,
-                    self.positional_embedding,
-                    self.ln_pre,
-                ],
-                *self.transformer.resblocks[:-1],
-                [
-                    self.transformer.resblocks[-1],
-                    self.ln_post,
-                ],
-                self.proj,
-            ]
-
-            def _unlock(x):
-                if isinstance(x, Sequence):
-                    for g in x:
-                        _unlock(g)
-                else:
-                    if isinstance(x, torch.nn.Parameter):
-                        x.requires_grad = True
-                    else:
-                        for p in x.parameters():
-                            p.requires_grad = True
-
-            _unlock(groups[-unlocked_groups:])
-
-    def init_parameters(self):
-        # FIXME OpenAI CLIP did not define an init for the VisualTransformer
-        # TODO experiment if default PyTorch init, below, or alternate init is best.
-
-        # nn.init.normal_(self.class_embedding, std=self.scale)
-        # nn.init.normal_(self.positional_embedding, std=self.scale)
-        #
-        # proj_std = (self.transformer.width ** -0.5) * ((2 * self.transformer.layers) ** -0.5)
-        # attn_std = self.transformer.width ** -0.5
-        # fc_std = (2 * self.transformer.width) ** -0.5
-        # for block in self.transformer.resblocks:
-        #     nn.init.normal_(block.attn.in_proj_weight, std=attn_std)
-        #     nn.init.normal_(block.attn.out_proj.weight, std=proj_std)
-        #     nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
-        #     nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
-        #
-        # if self.text_projection is not None:
-        #     nn.init.normal_(self.text_projection, std=self.scale)
-        pass
-
-    @torch.jit.ignore
-    def set_grad_checkpointing(self, enable=True):
-        self.transformer.grad_checkpointing = enable
-
-    def _global_pool(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        if self.pool_type == 'avg':
-            pooled, tokens = x[:, 1:].mean(dim=1), x[:, 1:]
-        elif self.pool_type == 'tok':
-            pooled, tokens = x[:, 0], x[:, 1:]
-        else:
-            pooled = tokens = x
-
-        return pooled, tokens
-
-    def forward(self, x: torch.Tensor):
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
 
-        # class embeddings and positional embeddings
-        x = torch.cat([_expand_token(self.class_embedding, x.shape[0]).to(x.dtype), x], dim=1)
-        # shape = [*, grid ** 2 + 1, width]
-        x = x + self.positional_embedding.to(x.dtype)
+        x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
+        
+        if x.shape[1] != self.positional_embedding.shape[0]:
+            x = x + self.interpolate_pos_encoding(x, w, h).to(x.dtype)
+        else:
+            x = x + self.positional_embedding.to(x.dtype)
 
-        x = self.patch_dropout(x)
+        x = self.ln_pre(x)           
+
+        x = x.permute(1, 0, 2)  # NLD -> LND
+        for blk in self.transformer.resblocks[:-1]:
+            x = blk(x)
+        for blk in self.transformer.resblocks[-1:]:
+            x = x + self.custom_attn(blk.attn, blk.ln_1(x), csa=csa)
+            x = x + blk.mlp(blk.ln_2(x))
+        x = x.permute(1, 0, 2)  # LND -> NLD
+            
+        if return_all:
+            return self.ln_post(x) @ self.proj
+
+        x = self.ln_post(x[:, 0, :])
+        if self.proj is not None:
+            x = x @ self.proj
+
+        return x
+    
+    def interpolate_pos_encoding(self, x, w, h):
+        npatch = x.shape[1] - 1
+        N = self.positional_embedding.shape[0] - 1
+        if npatch == N and w == h:
+            return self.positional_embedding
+        class_pos_embed = self.positional_embedding[[0]]
+        patch_pos_embed = self.positional_embedding[1:]
+        dim = x.shape[-1]
+        w0 = w // self.patch_size
+        h0 = h // self.patch_size
+        w0, h0 = w0 + 0.1, h0 + 0.1
+        patch_pos_embed = nn.functional.interpolate(
+            patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
+            scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
+            mode='bicubic',
+        )
+        assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
+        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+        return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1)
+    
+    def custom_attn(self, attn_layer, x, return_attn=False, with_attn=False, csa=False):
+        
+        num_heads = attn_layer.num_heads
+        _, bsz, embed_dim = x.size()
+        head_dim = embed_dim // num_heads
+        scale = head_dim ** -0.5
+
+        q, k, v = F.linear(x, attn_layer.in_proj_weight, attn_layer.in_proj_bias).chunk(3, dim=-1)
+        q = q.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+
+        if csa:
+            q_attn = torch.bmm(q, q.transpose(1, 2)) * scale
+            k_attn = torch.bmm(k, k.transpose(1, 2)) * scale
+            attn_weights = F.softmax(q_attn, dim=-1) + F.softmax(k_attn, dim=-1)
+        else:
+            attn_weights = torch.bmm(q * scale, k.transpose(1, 2))
+            attn_weights = F.softmax(attn_weights, dim=-1)
+
+        if return_attn:
+            return attn_weights
+
+        attn_output = torch.bmm(attn_weights, v)
+        attn_output = attn_output.transpose(0, 1).contiguous().view(-1, bsz, embed_dim)
+        attn_output = attn_layer.out_proj(attn_output)
+
+        if with_attn:
+            return attn_output, attn_weights
+
+        return attn_output
+    
+    def get_attn(self, x, layer='all', csa=False):
+
+        B, nc, w, h = x.shape
+
+        x = self.conv1(x.type(self.conv1.weight.dtype))  # shape = [*, width, grid, grid]
+        x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
+        x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
+
+        x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
+        
+        if x.shape[1] != self.positional_embedding.shape[0]:
+            x = x + self.interpolate_pos_encoding(x, w, h).to(x.dtype)
+        else:
+            x = x + self.positional_embedding.to(x.dtype)
+
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x)
-        x = x.permute(1, 0, 2)  # LND -> NLD
 
-        if self.attn_pool is not None:
-            if self.attn_pool_contrastive is not None:
-                # This is untested, WIP pooling that should match paper
-                x = self.ln_post(x)  # TBD LN first or separate one after each pool?
-                tokens = self.attn_pool(x)
-                if self.attn_pool_type == 'parallel':
-                    pooled = self.attn_pool_contrastive(x)
-                else:
-                    assert self.attn_pool_type == 'cascade'
-                    pooled = self.attn_pool_contrastive(tokens)
-            else:
-                # this is the original OpenCLIP CoCa setup, does not match paper
-                x = self.attn_pool(x)
-                x = self.ln_post(x)
-                pooled, tokens = self._global_pool(x)
-        elif self.final_ln_after_pool:
-            pooled, tokens = self._global_pool(x)
-            pooled = self.ln_post(pooled)
+        if layer == 'final':
+            for blk in self.transformer.resblocks[:-1]:
+                x = blk(x)
+            attn_map = self.custom_attn(self.transformer.resblocks[-1].attn,
+                                        self.transformer.resblocks[-1].ln_1(x),
+                                        csa=csa, return_attn=True)
+            return attn_map
+        elif layer == 'all':
+            attn_map = []
+            for blk in self.transformer.resblocks[:-1]:
+                x_i, attn_i = self.custom_attn(blk.attn, blk.ln_1(x), with_attn=True)
+                x = x + x_i
+                x = x + blk.mlp(blk.ln_2(x))
+                attn_map.append(attn_i)
+            for blk in self.transformer.resblocks[-1:]:
+                x_i, attn_i = self.custom_attn(blk.attn, blk.ln_1(x), with_attn=True, csa=True)
+                x = x + x_i
+                x = x + blk.mlp(blk.ln_2(x))
+                attn_map.append(attn_i)
+            return attn_map
         else:
-            x = self.ln_post(x)
-            pooled, tokens = self._global_pool(x)
-
-        if self.proj is not None:
-            pooled = pooled @ self.proj
-
-        if self.output_tokens:
-            return pooled, tokens
-        
-        return pooled
+            raise ValueError('layer should be final or all')
 
 
 def text_global_pool(x, text: Optional[torch.Tensor] = None, pool_type: str = 'argmax'):

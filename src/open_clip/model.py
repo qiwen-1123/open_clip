@@ -145,26 +145,35 @@ def _build_vision_tower(
         if vision_cfg.act_kwargs is not None:
             act_layer = partial(act_layer, **vision_cfg.act_kwargs)
 
+        # visual = VisionTransformer(
+        #     image_size=vision_cfg.image_size,
+        #     patch_size=vision_cfg.patch_size,
+        #     width=vision_cfg.width,
+        #     layers=vision_cfg.layers,
+        #     heads=vision_heads,
+        #     mlp_ratio=vision_cfg.mlp_ratio,
+        #     ls_init_value=vision_cfg.ls_init_value,
+        #     patch_dropout=vision_cfg.patch_dropout,
+        #     attentional_pool=vision_cfg.attentional_pool,
+        #     attn_pooler_queries=vision_cfg.attn_pooler_queries,
+        #     attn_pooler_heads=vision_cfg.attn_pooler_heads,
+        #     pos_embed_type=vision_cfg.pos_embed_type,
+        #     no_ln_pre=vision_cfg.no_ln_pre,
+        #     final_ln_after_pool=vision_cfg.final_ln_after_pool,
+        #     pool_type=vision_cfg.pool_type,
+        #     output_tokens=vision_cfg.output_tokens,
+        #     output_dim=embed_dim,
+        #     act_layer=act_layer,
+        #     norm_layer=norm_layer,
+        # )
+        
         visual = VisionTransformer(
-            image_size=vision_cfg.image_size,
+            input_resolution=vision_cfg.image_size,
             patch_size=vision_cfg.patch_size,
             width=vision_cfg.width,
             layers=vision_cfg.layers,
             heads=vision_heads,
-            mlp_ratio=vision_cfg.mlp_ratio,
-            ls_init_value=vision_cfg.ls_init_value,
-            patch_dropout=vision_cfg.patch_dropout,
-            attentional_pool=vision_cfg.attentional_pool,
-            attn_pooler_queries=vision_cfg.attn_pooler_queries,
-            attn_pooler_heads=vision_cfg.attn_pooler_heads,
-            pos_embed_type=vision_cfg.pos_embed_type,
-            no_ln_pre=vision_cfg.no_ln_pre,
-            final_ln_after_pool=vision_cfg.final_ln_after_pool,
-            pool_type=vision_cfg.pool_type,
-            output_tokens=vision_cfg.output_tokens,
             output_dim=embed_dim,
-            act_layer=act_layer,
-            norm_layer=norm_layer,
         )
 
     return visual
