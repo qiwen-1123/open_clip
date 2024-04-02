@@ -29,7 +29,7 @@ class MonoCLIP(nn.Module):
             model_name, pretrained=pre_trained
         )
 
-        self.clip = self.clip.to("cuda")
+        self.clip = self.clip.to("cuda").eval()
 
         # self.text_f = zeroshot_classifier(
         #     self.data_class, detection_templates, self.clip
@@ -42,6 +42,8 @@ class MonoCLIP(nn.Module):
             detection_templates,
             device="cuda",
         )
+        self.contexts = nn.Parameter(torch.zeros(self.text_f.shape).to("cuda"))
+        self.text_f += self.contexts
         # last_text_f = torch.load("text_f.pth")
         # res = last_text_f - self.text_f
         # torch.save(self.text_f.detach(), "text_f.pth")
@@ -49,7 +51,8 @@ class MonoCLIP(nn.Module):
         # self.adapter = FCLayer(1024).to(self.clip.dtype)
 
     def forward(self, x):
-        img_f = self.clip.encode_image(x)  # B, C, H, W
+        with torch.no_grad():
+            img_f = self.clip.encode_image(x)  # B, C, H, W
         h = img_f.shape[-2]
         w = img_f.shape[-1]
         # img_f=img_f.reshape(-1,img_f.shape[-3],img_f.shape[-2]*img_f.shape[-1]).permute(0,2,1)
