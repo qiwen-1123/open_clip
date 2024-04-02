@@ -35,15 +35,17 @@ class MonoCLIP(nn.Module):
         #     self.data_class, detection_templates, self.clip
         # )  # init text feature
         tokenizer = open_clip.get_tokenizer(model_name)
-        self.text_f = build_zero_shot_classifier(
+        self.text_clip = build_zero_shot_classifier(
             self.clip,
             tokenizer,
             self.data_class,
             detection_templates,
             device="cuda",
         )
-        self.contexts = nn.Parameter(torch.zeros(self.text_f.shape).to("cuda"))
-        self.text_f += self.contexts
+        self.contexts = nn.Parameter(torch.rand(self.text_clip.shape).cuda()).requires_grad_()
+        # nn.init.trunc_normal_(self.contexts)
+        self.text_f = (self.text_clip + self.contexts)
+        # self.text_f.retain_grad()
         # last_text_f = torch.load("text_f.pth")
         # res = last_text_f - self.text_f
         # torch.save(self.text_f.detach(), "text_f.pth")
