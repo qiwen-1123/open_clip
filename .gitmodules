@@ -1,0 +1,3 @@
+[submodule "src/open_clip/coop/Dassl.pytorch"]
+	path = src/open_clip/coop/Dassl.pytorch
+	url = https://github.com/KaiyangZhou/Dassl.pytorch.git
