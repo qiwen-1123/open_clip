@@ -90,10 +90,10 @@ def setup_cfg(args):
         cfg.merge_from_file(args.config_file)
 
     # 3. From input arguments
-    reset_cfg(cfg, args)
+    # reset_cfg(cfg, args)
 
     # 4. From optional input arguments
-    cfg.merge_from_list(args.opts)
+    # cfg.merge_from_list(args.opts)
 
     cfg.freeze()
 

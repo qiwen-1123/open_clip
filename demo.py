@@ -1,6 +1,5 @@
 import torch
 from PIL import Image
-import open_clip
 
 import torch
 import torch.nn as nn

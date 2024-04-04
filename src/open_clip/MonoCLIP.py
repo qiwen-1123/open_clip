@@ -27,12 +27,13 @@ class MonoCLIP(nn.Module):
         self.class_num = len(data_class)
         self.data_class = data_class
 
-        self.clip, _, self.preprocess = open_clip.create_model_and_transforms(
+        clip, _, self.preprocess = open_clip.create_model_and_transforms(
             model_name, pretrained=pre_trained
         )
 
-        self.clip = self.clip.eval()
-        self.clip.dtype=torch.float32
+        # self.clip = self.clip.eval()
+        self.image_encoder = clip.visual.eval()
+        clip.dtype=torch.float32
         
         # tokenizer = open_clip.get_tokenizer(model_name)
         # self.text_f = build_zero_shot_classifier(
@@ -43,15 +44,15 @@ class MonoCLIP(nn.Module):
         #     device="cuda",
         # )
         
-        self.prompt_learner = PromptLearner(coop_cfg, data_class, self.clip)
+        self.prompt_learner = PromptLearner(coop_cfg, data_class, clip)
         self.tokenized_prompts = self.prompt_learner.tokenized_prompts
-        self.text_encoder = TextEncoder(self.clip)
+        self.text_encoder = TextEncoder(clip)
 
         # self.adapter = FCLayer(1024).to(self.clip.dtype)
 
     def forward(self, x):
         with torch.no_grad():
-            img_f = self.clip.encode_image(x)  # B, C, H, W
+            img_f = self.image_encoder(x)  # B, C, H, W
         # img_f=img_f.reshape(-1,img_f.shape[-3],img_f.shape[-2]*img_f.shape[-1]).permute(0,2,1)
         # img_f = img_f / img_f.norm(dim=-1, keepdim=True)  # normalize img_f
 
@@ -59,7 +60,7 @@ class MonoCLIP(nn.Module):
         img_f /= img_f.norm(dim=-1, keepdim=True)
         img_f = img_f[:, 1:]
 
-        patch_size = self.clip.visual.patch_size
+        patch_size = self.image_encoder.patch_size
         w, h = x[0].shape[-2] // patch_size, x[0].shape[-1] // patch_size
         # end
 
