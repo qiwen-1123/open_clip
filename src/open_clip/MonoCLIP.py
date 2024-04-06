@@ -78,7 +78,6 @@ class MonoCLIP(nn.Module):
         class_conf = class_conf.permute(0, 2, 1).reshape(
             -1, self.class_num, H, W
         )  # B, K, H, W
-        class_conf = F.softmax(class_conf, dim=1)
 
         return class_conf
     
