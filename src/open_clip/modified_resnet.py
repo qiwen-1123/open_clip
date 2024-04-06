@@ -178,8 +178,4 @@ class ModifiedResNet(nn.Module):
         x = self.layer4(x)
         # x = self.attnpool(x)
         
-        ### modified for depth clip
-        # x=x.reshape(-1,2048,1400)
-        # x=x.reshape(-1,x.shape[-3],x.shape[-2]*x.shape[-1])
-        # x=x.permute(2,0,1)
         return x

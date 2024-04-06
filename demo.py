@@ -11,21 +11,8 @@ import torchvision.transforms as transforms
 
 from open_clip import build_zero_shot_classifier, MonoCLIP
 
-from open_clip import setup_cfg, generate_args # COOP part
-
 seed_value = 42
 torch.manual_seed(seed_value)
-
-obj_classes = ["object"]
-depth_classes = [
-    "giant",
-    "extremely close",
-    "close",
-    "not in distance",
-    "a little remote",
-    "far",
-    "unseen",
-]
 
 nusc_classes = [
     "car",
@@ -58,11 +45,9 @@ def show_img(img):
     plt.show()
 
 if __name__ == "__main__":
-    args = generate_args()
-    cfg = setup_cfg(args)
 
-    model = MonoCLIP(data_class=coco_cls, coop_cfg=cfg).to("cuda")
-    image_ori = Image.open("./data/000000252219.jpg")
+    model = MonoCLIP(data_class=coco_cls).to("cuda")
+    image_ori = Image.open("./data/cat.jpg")
 
     # model.preprocess.transforms.pop(0)
     # model.preprocess.transforms.pop(0)
@@ -72,14 +57,7 @@ if __name__ == "__main__":
     w=image.shape[-1]
 
     input = image.to("cuda").unsqueeze(0)
-    input_img_flip = torch.flip(input, [3])
-
     class_conf = model(input)
-    
-    # interpolation
-    # class_conf = nn.functional.interpolate(
-    #     class_conf, size=(448, 448), mode="bilinear", align_corners=True
-    # )
     
     class_conf_np = class_conf.squeeze().cpu().detach().numpy()
 
